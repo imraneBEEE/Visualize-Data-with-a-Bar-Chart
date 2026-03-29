@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>US Education Choropleth</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson@3"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a0f;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: 'IBM Plex Mono', monospace;
+      color: #e2e2e2;
+      padding: 40px 20px;
+    }
+
+    #title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: clamp(2rem, 5vw, 3.2rem);
+      letter-spacing: 0.12em;
+      color: #f0f0f0;
+      margin-bottom: 4px;
+      text-align: center;
+    }
+
+    #description {
+      font-size: 0.68rem;
+      letter-spacing: 0.18em;
+      color: #555;
+      text-transform: uppercase;
+      margin-bottom: 32px;
+      text-align: center;
+    }
+
+    #chart-wrapper { position: relative; width: 100%; max-width: 980px; }
+
+    svg { width: 100%; height: auto; display: block; }
+
+    .county {
+      stroke: #0a0a0f;
+      stroke-width: 0.3px;
+      cursor: pointer;
+      transition: opacity 0.1s;
+    }
+    .county:hover { opacity: 0.75; stroke: #fff; stroke-width: 0.8px; }
+
+    .state-border { fill: none; stroke: #0a0a0f; stroke-width: 1px; }
+
+    .tick line  { stroke: #2a2a35; }
+    .tick text  { fill: #888; font-family: 'IBM Plex Mono', monospace; font-size: 10px; }
+    .domain     { stroke: none; }
+
+    #tooltip {
+      display: none;
+      position: fixed;
+      background: #111118;
+      border: 1px solid #333;
+      border-radius: 4px;
+      padding: 10px 14px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.72rem;
+      color: #e2e2e2;
+      pointer-events: none;
+      z-index: 100;
+      white-space: nowrap;
+      box-shadow: 0 0 20px rgba(0,0,0,0.6);
+      line-height: 1.7;
+    }
+
+    #tooltip .tt-county { font-weight: 600; font-size: 0.78rem; }
+    #tooltip .tt-edu    { color: #00e5a0; }
+  </style>
+</head>
+<body>
+
+<h1 id="title">US Bachelor's Degree or Higher</h1>
+<p id="description">Percentage of adults age 25+ with a bachelor's degree by county — 2010–2014</p>
+
+<div id="chart-wrapper">
+  <div id="tooltip"></div>
+  <svg id="chart"></svg>
+</div>
+
+<script>
+  const EDU_URL     = "https://cdn.freecodecamp.org/testable-projects-fcc/data/choropleth_map/for_user_education.json";
+  const COUNTY_URL  = "https://cdn.freecodecamp.org/testable-projects-fcc/data/choropleth_map/counties.json";
+
+  const COLORS = ["#1a3a5c","#1f6f8b","#199eb0","#57c9d5","#a8e6cf",
+    "#d4f1c0","#f9e784","#f4a261","#e76f51","#c1121f"];
+
+  Promise.all([fetch(EDU_URL).then(r => r.json()), fetch(COUNTY_URL).then(r => r.json())])
+          .then(([eduData, topoData]) => {
+
+            const eduMap = {};
+            eduData.forEach(d => eduMap[d.fips] = d);
+
+            const W = 960, H = 620;
+            const margin = { top: 10, right: 20, bottom: 80, left: 20 };
+
+            const svg = d3.select("#chart")
+                    .attr("viewBox", `0 0 ${W} ${H}`)
+                    .attr("preserveAspectRatio", "xMidYMid meet");
+
+            const path = d3.geoPath();
+
+            const eduValues = eduData.map(d => d.bachelorsOrHigher);
+            const colorScale = d3.scaleQuantile()
+                    .domain(eduValues)
+                    .range(COLORS);
+
+            const counties = topojson.feature(topoData, topoData.objects.counties);
+            const states   = topojson.mesh(topoData, topoData.objects.states, (a, b) => a !== b);
+
+            const tooltip = document.getElementById("tooltip");
+
+            // Counties
+            svg.append("g")
+                    .selectAll(".county")
+                    .data(counties.features)
+                    .enter()
+                    .append("path")
+                    .attr("class", "county")
+                    .attr("d", path)
+                    .attr("data-fips",      d => d.id)
+                    .attr("data-education", d => eduMap[d.id] ? eduMap[d.id].bachelorsOrHigher : 0)
+                    .attr("fill", d => {
+                      const edu = eduMap[d.id];
+                      return edu ? colorScale(edu.bachelorsOrHigher) : "#222";
+                    })
+                    .on("mousemove", function(event, d) {
+                      const edu = eduMap[d.id];
+                      tooltip.style.display = "block";
+                      tooltip.setAttribute("data-education", edu ? edu.bachelorsOrHigher : 0);
+                      tooltip.innerHTML = edu
+                              ? `<div class="tt-county">${edu.area_name}, ${edu.state}</div>
+                 <div class="tt-edu">${edu.bachelorsOrHigher}%</div>`
+                              : `<div class="tt-county">Unknown</div>`;
+                      tooltip.style.left = (event.clientX + 16) + "px";
+                      tooltip.style.top  = (event.clientY - 40) + "px";
+                    })
+                    .on("mouseleave", () => tooltip.style.display = "none");
+
+            // State borders
+            svg.append("path")
+                    .datum(states)
+                    .attr("class", "state-border")
+                    .attr("d", path);
+
+            // Legend
+            const thresholds  = colorScale.quantiles();
+            const allBreaks   = [d3.min(eduValues), ...thresholds, d3.max(eduValues)];
+            const legendW     = 36;
+            const legendH     = 14;
+            const legendLeft  = W / 2 - (COLORS.length * legendW) / 2;
+            const legendTop   = H - 60;
+
+            const legend = svg.append("g")
+                    .attr("id", "legend")
+                    .attr("transform", `translate(${legendLeft},${legendTop})`);
+
+            legend.selectAll("rect")
+                    .data(COLORS)
+                    .enter()
+                    .append("rect")
+                    .attr("x", (d, i) => i * legendW)
+                    .attr("y", 0)
+                    .attr("width",  legendW)
+                    .attr("height", legendH)
+                    .attr("fill", d => d);
+
+            const legendScale = d3.scaleLinear()
+                    .domain([d3.min(eduValues), d3.max(eduValues)])
+                    .range([0, legendW * COLORS.length]);
+
+            legend.append("g")
+                    .attr("transform", `translate(0,${legendH})`)
+                    .call(
+                            d3.axisBottom(legendScale)
+                                    .tickValues(allBreaks)
+                                    .tickFormat(d => d.toFixed(1) + "%")
+                    )
+                    .selectAll("text")
+                    .attr("font-size", "9px");
+          });
+</script>
+
+<script src="https://cdn.freecodecamp.org/testable-projects-fcc/v1/bundle.js"></script>
+</body>
+</html>
