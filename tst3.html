@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Global Temperature Heat Map</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a0f;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: 'IBM Plex Mono', monospace;
+      color: #e2e2e2;
+      padding: 40px 20px;
+    }
+
+    #title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: clamp(2rem, 5vw, 3.5rem);
+      letter-spacing: 0.12em;
+      color: #f0f0f0;
+      margin-bottom: 4px;
+      text-align: center;
+    }
+
+    #description {
+      font-size: 0.7rem;
+      letter-spacing: 0.2em;
+      color: #555;
+      text-transform: uppercase;
+      margin-bottom: 40px;
+      text-align: center;
+    }
+
+    #chart-wrapper { position: relative; width: 100%; max-width: 1100px; }
+
+    svg { width: 100%; height: auto; display: block; }
+
+    .cell { stroke: none; opacity: 0.92; cursor: pointer; transition: opacity 0.1s; }
+    .cell:hover { opacity: 1; stroke: #fff; stroke-width: 0.5px; }
+
+    .tick line  { stroke: #2a2a35; }
+    .tick text  { fill: #888; font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+    .domain     { stroke: #2a2a35; }
+
+    #tooltip {
+      display: none;
+      position: fixed;
+      background: #111118;
+      border: 1px solid #333;
+      border-radius: 4px;
+      padding: 10px 16px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.72rem;
+      color: #e2e2e2;
+      pointer-events: none;
+      z-index: 100;
+      white-space: nowrap;
+      box-shadow: 0 0 20px rgba(0,0,0,0.6);
+      line-height: 1.7;
+    }
+
+    #tooltip .tt-date { font-weight: 600; font-size: 0.8rem; }
+    #tooltip .tt-temp { color: #00e5a0; }
+    #tooltip .tt-var  { color: #888; font-size: 0.68rem; }
+  </style>
+</head>
+<body>
+
+<h1 id="title">Global Surface Temperature</h1>
+<p id="description">Monthly global land-surface temperature — 1753 to 2015 — base temp: 8.66°C</p>
+
+<div id="chart-wrapper">
+  <div id="tooltip"></div>
+  <svg id="chart"></svg>
+</div>
+
+<script>
+  const DATA_URL = "https://raw.githubusercontent.com/freeCodeCamp/ProjectReferenceData/master/global-temperature.json";
+
+  const MONTHS = ["January","February","March","April","May","June",
+    "July","August","September","October","November","December"];
+
+  // 10-color diverging scale: deep blue → green → red
+  const COLORS = [
+    "#313695","#4575b4","#74add1","#abd9e9","#e0f3f8",
+    "#ffffbf","#fee090","#fdae61","#f46d43","#d73027"
+  ];
+
+  fetch(DATA_URL)
+          .then(r => r.json())
+          .then(json => {
+            const base = json.baseTemperature;
+            const data = json.monthlyVariance;
+
+            const margin = { top: 30, right: 30, bottom: 100, left: 100 };
+            const W = 1060, H = 480;
+            const innerW = W - margin.left - margin.right;
+            const innerH = H - margin.top - margin.bottom;
+
+            const svg = d3.select("#chart")
+                    .attr("viewBox", `0 0 ${W} ${H}`)
+                    .attr("preserveAspectRatio", "xMidYMid meet");
+
+            const g = svg.append("g")
+                    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            const years  = [...new Set(data.map(d => d.year))];
+            const cellW  = innerW / years.length;
+            const cellH  = innerH / 12;
+
+            const xScale = d3.scaleBand()
+                    .domain(years)
+                    .range([0, innerW]);
+
+            const yScale = d3.scaleBand()
+                    .domain(d3.range(1, 13))
+                    .range([0, innerH]);
+
+            const temps = data.map(d => base + d.variance);
+            const colorScale = d3.scaleQuantile()
+                    .domain(temps)
+                    .range(COLORS);
+
+            // X Axis — show every 10 years
+            g.append("g")
+                    .attr("id", "x-axis")
+                    .attr("transform", `translate(0,${innerH})`)
+                    .call(
+                            d3.axisBottom(xScale)
+                                    .tickValues(years.filter(y => y % 10 === 0))
+                                    .tickFormat(d3.format("d"))
+                    );
+
+            // Y Axis — full month names
+            g.append("g")
+                    .attr("id", "y-axis")
+                    .call(
+                            d3.axisLeft(yScale)
+                                    .tickFormat(m => MONTHS[m - 1])
+                    );
+
+            // Cells
+            const tooltip = document.getElementById("tooltip");
+
+            g.selectAll(".cell")
+                    .data(data)
+                    .enter()
+                    .append("rect")
+                    .attr("class", "cell")
+                    .attr("data-month", d => d.month - 1)
+                    .attr("data-year",  d => d.year)
+                    .attr("data-temp",  d => base + d.variance)
+                    .attr("x",     d => xScale(d.year))
+                    .attr("y",     d => yScale(d.month))
+                    .attr("width",  cellW + 0.5)
+                    .attr("height", cellH + 0.5)
+                    .attr("fill",  d => colorScale(base + d.variance))
+                    .on("mousemove", function(event, d) {
+                      const temp = (base + d.variance).toFixed(2);
+                      const variance = (d.variance >= 0 ? "+" : "") + d.variance.toFixed(2);
+                      tooltip.style.display = "block";
+                      tooltip.setAttribute("data-year", d.year);
+                      tooltip.innerHTML = `
+              <div class="tt-date">${MONTHS[d.month - 1]} ${d.year}</div>
+              <div class="tt-temp">${temp}°C</div>
+              <div class="tt-var">${variance}°C vs baseline</div>
+            `;
+                      tooltip.style.left = (event.clientX + 16) + "px";
+                      tooltip.style.top  = (event.clientY - 50) + "px";
+                    })
+                    .on("mouseleave", () => tooltip.style.display = "none");
+
+            // Legend
+            const thresholds = colorScale.quantiles();
+            const allBreaks  = [d3.min(temps), ...thresholds, d3.max(temps)];
+            const legendW    = 30;
+            const legendH    = 15;
+            const legendX    = 0;
+            const legendY    = innerH + 55;
+
+            const legend = g.append("g").attr("id", "legend")
+                    .attr("transform", `translate(${legendX},${legendY})`);
+
+            legend.selectAll("rect")
+                    .data(COLORS)
+                    .enter()
+                    .append("rect")
+                    .attr("x", (d, i) => i * legendW)
+                    .attr("y", 0)
+                    .attr("width",  legendW)
+                    .attr("height", legendH)
+                    .attr("fill", d => d);
+
+            // Legend axis
+            const legendScale = d3.scaleLinear()
+                    .domain([d3.min(temps), d3.max(temps)])
+                    .range([0, legendW * COLORS.length]);
+
+            legend.append("g")
+                    .attr("transform", `translate(0,${legendH})`)
+                    .call(
+                            d3.axisBottom(legendScale)
+                                    .tickValues(allBreaks)
+                                    .tickFormat(d => d.toFixed(1) + "°")
+                    )
+                    .selectAll("text")
+                    .attr("font-size", "9px");
+          });
+</script>
+
+<script src="https://cdn.freecodecamp.org/testable-projects-fcc/v1/bundle.js"></script>
+</body>
+</html>
